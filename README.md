@@ -51,7 +51,10 @@ Useful bot vars:
 
 - `CHROME_AUTOMATION_USER_DATA_DIR` (default: `chrome-bot-profile`)
 - `CHROME_PROFILE_DIRECTORY`
-- `CHROME_EXECUTABLE_PATH`
+- `CHROME_CHANNEL` (recommended: `chrome`)
+- `CHROME_EXECUTABLE_PATH` (optional absolute path override)
+- `CHROME_DISABLE_SANDBOX` (set `true` on hosts that require no-sandbox)
+- `MEET_BOT_HEADLESS` (set `true` for servers)
 
 Frontend vars:
 

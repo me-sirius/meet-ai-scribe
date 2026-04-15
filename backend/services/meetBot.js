@@ -236,6 +236,9 @@ const getAutomationUserDataDir = () => {
 
 const getCommonLaunchOptions = () => {
     const headless = toBoolean(process.env.MEET_BOT_HEADLESS, false);
+    const executablePath = String(process.env.CHROME_EXECUTABLE_PATH || "").trim();
+    const channel = String(process.env.CHROME_CHANNEL || "").trim().toLowerCase();
+    const disableSandbox = toBoolean(process.env.CHROME_DISABLE_SANDBOX, false);
 
     const launchOptions = {
         headless,
@@ -246,10 +249,14 @@ const getCommonLaunchOptions = () => {
         ],
     };
 
-    if (process.env.CHROME_EXECUTABLE_PATH) {
-        launchOptions.executablePath = process.env.CHROME_EXECUTABLE_PATH;
-    } else {
-        launchOptions.channel = "chrome";
+    if (disableSandbox) {
+        launchOptions.args.push("--no-sandbox", "--disable-setuid-sandbox");
+    }
+
+    if (executablePath) {
+        launchOptions.executablePath = executablePath;
+    } else if (channel) {
+        launchOptions.channel = channel;
     }
 
     return launchOptions;
@@ -257,10 +264,11 @@ const getCommonLaunchOptions = () => {
 
 const launchPersistentChromeContext = async () => {
     const userDataDir = getAutomationUserDataDir();
+    const commonLaunchOptions = getCommonLaunchOptions();
     const launchOptions = {
-        ...getCommonLaunchOptions(),
+        ...commonLaunchOptions,
         viewport: null,
-        args: [...getCommonLaunchOptions().args],
+        args: [...(commonLaunchOptions.args || [])],
     };
 
     if (process.env.CHROME_PROFILE_DIRECTORY) {
