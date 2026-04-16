@@ -2,6 +2,7 @@
   "name": "meet-ai-scribe-root",
   "private": true,
   "scripts": {
-    "start": "npm start --prefix backend"
+    "start": "npm start --prefix backend",
+    "heroku-postbuild": "npm install --prefix backend"
   }
 }
