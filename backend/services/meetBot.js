@@ -258,6 +258,9 @@ const getCommonLaunchOptions = () => {
         launchOptions.executablePath = executablePath;
     } else if (channel) {
         launchOptions.channel = channel;
+    } else if (headless) {
+        // Prefer bundled Chromium headless mode to avoid missing headless-shell artifacts on PaaS builds.
+        launchOptions.channel = "chromium";
     }
 
     return launchOptions;

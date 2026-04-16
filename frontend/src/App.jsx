@@ -594,7 +594,7 @@ function App() {
 
           ) : (
             /* ── Bot Panel ── */
-            <div className="grid items-start gap-4 lg:justify-center lg:grid-cols-[460px_340px] xl:grid-cols-[480px_360px]">
+            <div className="grid items-start gap-4 lg:justify-center lg:grid-cols-[430px_330px] xl:grid-cols-[450px_350px]">
               <section className="space-y-3">
               {/* Control card */}
               <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.06)] p-5 space-y-4">
