@@ -121,3 +121,7 @@ Defaults:
 - Keep the bot profile directory out of git (`chrome-bot-profile/`).
 - First run may require Google account sign-in in the bot browser profile.
 - Heroku deploys: ensure Chromium is installed for the backend package during build (this repo uses `PLAYWRIGHT_BROWSERS_PATH=0` in `heroku-postbuild`) so runtime can find the Playwright executable.
+- Heroku deploys: add the Apt buildpack before Node.js so Linux browser dependencies from `Aptfile` are available.
+	- `heroku buildpacks:clear -a <app-name>`
+	- `heroku buildpacks:add --index 1 https://github.com/heroku/heroku-buildpack-apt -a <app-name>`
+	- `heroku buildpacks:add --index 2 heroku/nodejs -a <app-name>`

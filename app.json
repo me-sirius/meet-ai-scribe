@@ -1,0 +1,23 @@
+{
+  "name": "meet-ai-scribe-backend",
+  "description": "Meet AI Scribe backend with Playwright automation",
+  "buildpacks": [
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-apt"
+    },
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "env": {
+    "PLAYWRIGHT_BROWSERS_PATH": {
+      "value": "0"
+    },
+    "MEET_BOT_HEADLESS": {
+      "value": "true"
+    },
+    "CHROME_DISABLE_SANDBOX": {
+      "value": "true"
+    }
+  }
+}
