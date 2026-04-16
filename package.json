@@ -8,15 +8,14 @@
   },
   "scripts": {
     "start": "npm start --prefix backend",
-    "dev": "nodemon --watch server.js --watch routes --watch services --watch middlewares --ext js,mjs,cjs,json server.js",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate --schema=backend/prisma/schema.prisma",
+    "heroku-postbuild": "npm install --prefix backend && npx playwright install chromium",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:import-users": "node scripts/importUsersToPrisma.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "heroku-postbuild": "npm install --prefix backend"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
