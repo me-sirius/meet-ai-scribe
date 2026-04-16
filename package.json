@@ -1,11 +1,38 @@
 {
   "name": "meet-ai-scribe-root",
+  "version": "1.0.0",
+  "description": "",
   "private": true,
   "engines": {
     "node": "20.x"
   },
   "scripts": {
     "start": "npm start --prefix backend",
+    "dev": "nodemon --watch server.js --watch routes --watch services --watch middlewares --ext js,mjs,cjs,json server.js",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:import-users": "node scripts/importUsersToPrisma.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
     "heroku-postbuild": "npm install --prefix backend"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/client": "^6.17.1",
+    "@supabase/supabase-js": "^2.103.2",
+    "axios": "^1.15.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "nodemon": "^3.1.14",
+    "playwright": "^1.55.0",
+    "prisma": "^6.17.1"
   }
 }
