@@ -1,0 +1,7 @@
+{
+  "name": "meet-ai-scribe-root",
+  "private": true,
+  "scripts": {
+    "start": "npm start --prefix backend"
+  }
+}
