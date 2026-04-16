@@ -65,6 +65,7 @@ const MEET_MEDIA_MODAL_PATTERNS = [
     /open system settings/i,
 ];
 const PROFILE_LOCK_PATTERNS = /profile appears to be in use|user data directory is already in use|processsingleton|singletonlock|failed to create a processsingleton/i;
+const MISSING_BROWSER_DEPS_PATTERNS = /Host system is missing dependencies|error while loading shared libraries|lib[a-zA-Z0-9_.-]+\.so/i;
 
 const toPositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(value, 10);
@@ -221,6 +222,43 @@ const parseStartPayload = (payload) => {
     };
 };
 
+const appendUniqueArgs = (baseArgs = [], extraArgs = []) => {
+    const merged = [...baseArgs];
+
+    for (const arg of extraArgs) {
+        if (!merged.includes(arg)) {
+            merged.push(arg);
+        }
+    }
+
+    return merged;
+};
+
+const getContainerFallbackArgs = (baseArgs = []) => {
+    return appendUniqueArgs(baseArgs, [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--no-zygote",
+        "--disable-gpu",
+    ]);
+};
+
+const formatLaunchFailureMessage = (prefix, launchMessage) => {
+    const details = String(launchMessage || "").trim();
+
+    if (!details) {
+        return prefix;
+    }
+
+    if (MISSING_BROWSER_DEPS_PATTERNS.test(details)) {
+        const compact = compactErrorMessage(details, 1200);
+        return `${prefix} Missing Linux browser dependencies on host. Playwright: ${compact}`;
+    }
+
+    return `${prefix} Playwright: ${compactErrorMessage(details, 1200)}`;
+};
+
 const getAutomationUserDataDir = () => {
     const configuredDir = String(
         process.env.CHROME_AUTOMATION_USER_DATA_DIR || process.env.CHROME_USER_DATA_DIR || "",
@@ -239,16 +277,30 @@ const getCommonLaunchOptions = () => {
     const headless = toBoolean(process.env.MEET_BOT_HEADLESS, false);
     const executablePath = String(process.env.CHROME_EXECUTABLE_PATH || "").trim();
     const channel = String(process.env.CHROME_CHANNEL || "").trim().toLowerCase();
-    const disableSandbox = toBoolean(process.env.CHROME_DISABLE_SANDBOX, false);
+    const isContainerRuntime = Boolean(
+        process.env.DYNO
+        || process.env.RENDER
+        || process.env.RAILWAY_ENVIRONMENT
+        || process.env.K_SERVICE,
+    );
+    const disableSandbox = toBoolean(process.env.CHROME_DISABLE_SANDBOX, isContainerRuntime);
 
     const launchOptions = {
         headless,
         args: [
-            "--start-maximized",
             "--disable-blink-features=AutomationControlled",
             "--disable-notifications",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
         ],
     };
+
+    if (headless) {
+        launchOptions.args.push("--window-size=1365,900");
+    } else {
+        launchOptions.args.push("--start-maximized");
+    }
 
     if (disableSandbox) {
         launchOptions.args.push("--no-sandbox", "--disable-setuid-sandbox");
@@ -280,6 +332,7 @@ const launchPersistentChromeContext = async () => {
     }
 
     let context;
+    let launchError;
 
     try {
         context = await chromium.launchPersistentContext(
@@ -287,6 +340,7 @@ const launchPersistentChromeContext = async () => {
             launchOptions,
         );
     } catch (error) {
+        launchError = error;
         const launchMessage = String(error?.message || "");
 
         if (PROFILE_LOCK_PATTERNS.test(launchMessage)) {
@@ -296,13 +350,41 @@ const launchPersistentChromeContext = async () => {
             );
         }
 
-        const details = compactErrorMessage(launchMessage, 320);
-        throw createHttpError(
-            details
-                ? `Failed to launch Playwright persistent context. Playwright: ${details}`
-                : "Failed to launch Playwright persistent context.",
-            500,
-        );
+        // Retry once with container-safe fallback flags for hosts where Chromium exits immediately.
+        if (!MISSING_BROWSER_DEPS_PATTERNS.test(launchMessage)) {
+            const fallbackArgs = getContainerFallbackArgs(launchOptions.args || []);
+
+            if (fallbackArgs.length !== (launchOptions.args || []).length) {
+                const retryOptions = {
+                    ...launchOptions,
+                    args: fallbackArgs,
+                };
+
+                if (!retryOptions.executablePath && !retryOptions.channel) {
+                    retryOptions.channel = "chromium";
+                }
+
+                try {
+                    context = await chromium.launchPersistentContext(
+                        userDataDir,
+                        retryOptions,
+                    );
+                    launchError = null;
+                } catch (retryError) {
+                    launchError = retryError;
+                }
+            }
+        }
+
+        if (!context) {
+            throw createHttpError(
+                formatLaunchFailureMessage(
+                    "Failed to launch Playwright persistent context.",
+                    launchError?.message,
+                ),
+                500,
+            );
+        }
     }
 
     context.setDefaultTimeout(
@@ -316,16 +398,46 @@ const launchGuestContext = async () => {
     const launchOptions = getCommonLaunchOptions();
 
     let browser;
+    let launchError;
+
     try {
         browser = await chromium.launch(launchOptions);
     } catch (error) {
-        const details = compactErrorMessage(error?.message, 320);
-        throw createHttpError(
-            details
-                ? `Failed to launch Playwright guest context. Playwright: ${details}`
-                : "Failed to launch Playwright guest context.",
-            500,
-        );
+        launchError = error;
+        const launchMessage = String(error?.message || "");
+
+        // Retry once with container-safe fallback flags for hosts where Chromium exits immediately.
+        if (!MISSING_BROWSER_DEPS_PATTERNS.test(launchMessage)) {
+            const fallbackArgs = getContainerFallbackArgs(launchOptions.args || []);
+
+            if (fallbackArgs.length !== (launchOptions.args || []).length) {
+                const retryOptions = {
+                    ...launchOptions,
+                    args: fallbackArgs,
+                };
+
+                if (!retryOptions.executablePath && !retryOptions.channel) {
+                    retryOptions.channel = "chromium";
+                }
+
+                try {
+                    browser = await chromium.launch(retryOptions);
+                    launchError = null;
+                } catch (retryError) {
+                    launchError = retryError;
+                }
+            }
+        }
+
+        if (!browser) {
+            throw createHttpError(
+                formatLaunchFailureMessage(
+                    "Failed to launch Playwright guest context.",
+                    launchError?.message,
+                ),
+                500,
+            );
+        }
     }
 
     const context = await browser.newContext({ viewport: null });
