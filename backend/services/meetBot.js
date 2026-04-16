@@ -22,6 +22,7 @@ const DEFAULT_GEMINI_MODEL_FALLBACKS = [
     "gemini-2.0-flash",
 ];
 const DEFAULT_AUTOMATION_USER_DATA_DIR = path.resolve(__dirname, "..", "chrome-bot-profile");
+const TERMINATED_BY_USER_REASON = "terminated-by-user";
 
 const MIC_OFF_PATTERNS = [/turn on microphone/i, /microphone off/i, /unmute/i];
 const MIC_ON_PATTERNS = [/turn off microphone/i, /microphone on/i, /\bmute\b/i];
@@ -1075,6 +1076,7 @@ const waitForTranscriptWindow = async (
         maxSeconds,
         consoleLogIntervalMs = DEFAULT_TRANSCRIPT_CONSOLE_LOG_INTERVAL_MS,
         onCaption,
+        shouldStop,
     },
 ) => {
     const startedAt = Date.now();
@@ -1108,6 +1110,17 @@ const waitForTranscriptWindow = async (
         });
 
         const now = Date.now();
+
+        if (typeof shouldStop === "function" && shouldStop()) {
+            await flushPendingTranscriptLogs();
+
+            const elapsedMs = now - startedAt;
+            return {
+                actualDurationSeconds: Math.max(1, Math.round(elapsedMs / 1000)),
+                endReason: TERMINATED_BY_USER_REASON,
+            };
+        }
+
         const stopReason = await detectCaptureStopReason(page);
 
         if (stopReason) {
@@ -1265,8 +1278,9 @@ const summarizeTranscriptWithGemini = async (transcript) => {
     return "Transcript captured, but summary generation failed for unknown reasons.";
 };
 
-const startMeetBot = async (payload, hooks = {}) => {
+const startMeetBot = async (payload, hooks = {}, runtime = {}) => {
     const { meetLink, participantName, joinAsGuest } = parseStartPayload(payload);
+    const shouldStop = () => Boolean(runtime?.signal?.aborted);
     const trimmedLink = meetLink?.trim();
     const emitStatus = (status, details = {}) => {
         safeCallHook(hooks?.onStatus, {
@@ -1691,6 +1705,7 @@ const startMeetBot = async (payload, hooks = {}) => {
             maxSeconds: captureMaxSeconds,
             consoleLogIntervalMs: transcriptConsoleLogIntervalMs,
             onCaption: emitCaption,
+            shouldStop,
         });
 
         logMeetBotStatus("Transcript capture window ended.", captureWindowResult);
@@ -1699,6 +1714,25 @@ const startMeetBot = async (payload, hooks = {}) => {
         logMeetBotStatus("Transcript collector stopped.", {
             transcriptLineCount: entries.length,
         });
+
+        if (captureWindowResult.endReason === TERMINATED_BY_USER_REASON) {
+            emitStatus("terminated", {
+                captureEndReason: TERMINATED_BY_USER_REASON,
+            });
+
+            return {
+                status: "Meeting capture terminated by user.",
+                joinButtonLabel,
+                transcript,
+                summary: transcript
+                    ? "Capture was terminated by user. Partial transcript has been saved."
+                    : "Capture was terminated by user before transcript lines were captured.",
+                transcriptLineCount: entries.length,
+                captureDurationSeconds: captureWindowResult.actualDurationSeconds,
+                pendingApproval: false,
+                captureEndReason: TERMINATED_BY_USER_REASON,
+            };
+        }
 
         logMeetBotStatus("Generating summary from captured transcript.", {
             transcriptLineCount: entries.length,

@@ -95,6 +95,11 @@ export const getBotRunLive = async ({ runId, fromIndex = 0 }) => {
     return response.data;
 };
 
+export const terminateBotRun = async ({ runId }) => {
+    const response = await api.post(`/bot-run/${encodeURIComponent(runId)}/terminate`);
+    return response.data;
+};
+
 export const fetchMeetingHistory = async ({ limit = 20 } = {}) => {
     const response = await api.get("/meetings", {
         params: {
@@ -102,5 +107,10 @@ export const fetchMeetingHistory = async ({ limit = 20 } = {}) => {
         },
     });
 
+    return response.data;
+};
+
+export const deleteMeeting = async (meetingId) => {
+    const response = await api.delete(`/meetings/${encodeURIComponent(meetingId)}`);
     return response.data;
 };

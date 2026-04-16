@@ -9,7 +9,7 @@
   "scripts": {
     "start": "npm start --prefix backend",
     "postinstall": "prisma generate --schema=backend/prisma/schema.prisma",
-    "heroku-postbuild": "npm install --prefix backend && npx playwright install chromium",
+    "heroku-postbuild": "npm install --prefix backend && cd backend && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

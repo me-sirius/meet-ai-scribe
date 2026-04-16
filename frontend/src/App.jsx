@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   clearAuthSession,
+  deleteMeeting,
   fetchMeetingHistory,
   fetchMe,
   getBotRunLive,
@@ -10,6 +11,7 @@ import {
   signIn,
   signUp,
   startBot,
+  terminateBotRun,
 } from "./services/api";
 
 function App() {
@@ -34,6 +36,9 @@ function App() {
   const [meetingHistory, setMeetingHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [historyActionMessage, setHistoryActionMessage] = useState("");
+  const [deletingMeetingIds, setDeletingMeetingIds] = useState({});
+  const [isTerminating, setIsTerminating] = useState(false);
   const [meta, setMeta] = useState({
     usedParticipantName: "",
     transcriptLineCount: 0,
@@ -98,6 +103,7 @@ function App() {
 
     setHistoryLoading(true);
     setHistoryError("");
+    setHistoryActionMessage("");
 
     try {
       const response = await fetchMeetingHistory({ limit: 30 });
@@ -117,12 +123,82 @@ function App() {
     if (!user) {
       setMeetingHistory([]);
       setHistoryError("");
+      setHistoryActionMessage("");
+      setDeletingMeetingIds({});
       setHistoryLoading(false);
       return;
     }
 
     void loadMeetingHistory();
   }, [user]);
+
+  const handleDeleteMeeting = async (meetingId) => {
+    const safeMeetingId = String(meetingId || "").trim();
+
+    if (!safeMeetingId) {
+      setHistoryError("Invalid meeting id.");
+      return;
+    }
+
+    if (deletingMeetingIds[safeMeetingId]) {
+      return;
+    }
+
+    const shouldDelete = globalThis.confirm("Delete this meeting from history? This cannot be undone.");
+    if (!shouldDelete) {
+      return;
+    }
+
+    setHistoryError("");
+    setHistoryActionMessage("");
+
+    setDeletingMeetingIds((prev) => ({
+      ...prev,
+      [safeMeetingId]: true,
+    }));
+
+    try {
+      await deleteMeeting(safeMeetingId);
+      setMeetingHistory((prev) => prev.filter((meeting) => meeting.id !== safeMeetingId));
+      setHistoryActionMessage("Meeting deleted.");
+    } catch (error) {
+      if (error?.response?.status === 401) {
+        handleSignOut();
+      } else {
+        setHistoryError(error?.response?.data?.message || "Failed to delete meeting.");
+      }
+    } finally {
+      setDeletingMeetingIds((prev) => {
+        const next = { ...prev };
+        delete next[safeMeetingId];
+        return next;
+      });
+    }
+  };
+
+  const handleTerminate = async () => {
+    const activeRunId = String(livePollRef.current.runId || "").trim();
+
+    if (!activeRunId || isTerminating) {
+      return;
+    }
+
+    setIsTerminating(true);
+    setStatusMessage("Termination requested...");
+
+    try {
+      const response = await terminateBotRun({ runId: activeRunId });
+      setStatusMessage(response?.status || "Termination requested.");
+    } catch (error) {
+      if (error?.response?.status === 401) {
+        handleSignOut();
+      } else {
+        setStatusMessage(error?.response?.data?.message || "Failed to terminate active run.");
+      }
+    } finally {
+      setIsTerminating(false);
+    }
+  };
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -159,6 +235,9 @@ function App() {
     setStatusMessage("");
     setMeetingHistory([]);
     setHistoryError("");
+    setHistoryActionMessage("");
+    setDeletingMeetingIds({});
+    setIsTerminating(false);
     setHistoryLoading(false);
     resetBotResults();
   };
@@ -279,6 +358,98 @@ function App() {
     </button>
   );
 
+  const historyPanel = (
+    <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.06)] p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-neutral-800">Meeting History</h2>
+        <button
+          type="button"
+          onClick={() => { void loadMeetingHistory(); }}
+          disabled={historyLoading}
+          className="text-xs text-neutral-500 hover:text-neutral-800 disabled:opacity-50"
+        >
+          {historyLoading ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+
+      {historyActionMessage && (
+        <p className="mb-3 text-xs text-emerald-600">{historyActionMessage}</p>
+      )}
+
+      {historyLoading ? (
+        <p className="text-sm text-neutral-400">Loading history...</p>
+      ) : historyError ? (
+        <p className="text-sm text-red-500">{historyError}</p>
+      ) : meetingHistory.length === 0 ? (
+        <p className="text-sm text-neutral-400">No meetings in history yet.</p>
+      ) : (
+        <div className="max-h-[62vh] overflow-y-auto pr-1 space-y-3">
+          {meetingHistory.map((meeting) => {
+            const createdAtText = meeting?.createdAt
+              ? new Date(meeting.createdAt).toLocaleString()
+              : "Unknown time";
+            const summaryPreview = String(meeting?.summary || "").trim();
+            const isDeletingMeeting = Boolean(deletingMeetingIds[meeting.id]);
+
+            return (
+              <div key={meeting.id} className="rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-neutral-500">{createdAtText}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-wide text-neutral-500">{meeting?.status || "unknown"}</span>
+                    <button
+                      type="button"
+                      onClick={() => { void handleDeleteMeeting(meeting?.id); }}
+                      disabled={isDeletingMeeting}
+                      aria-label="Delete meeting"
+                      title="Delete meeting"
+                      className="inline-flex items-center justify-center text-red-500 hover:text-red-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isDeletingMeeting ? (
+                        <span className="w-3.5 h-3.5 border border-current border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M2.5 4h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <path d="M6 2.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <path d="M5 4v8.5c0 .55.45 1 1 1h4c.55 0 1-.45 1-1V4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          <path d="M7 6.5v4.5M9 6.5v4.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="mt-1 text-xs text-neutral-400 break-all">{meeting?.meetLink || ""}</p>
+
+                <div className="mt-2 flex items-center gap-2 text-xs text-neutral-500">
+                  <span>{meeting?.transcriptLineCount || 0} lines</span>
+                  <span className="w-1 h-1 rounded-full bg-neutral-300" />
+                  <span>{meeting?.captureDurationSeconds || 0}s</span>
+                  {meeting?.captureEndReason && (
+                    <>
+                      <span className="w-1 h-1 rounded-full bg-neutral-300" />
+                      <span>{meeting.captureEndReason}</span>
+                    </>
+                  )}
+                </div>
+
+                {summaryPreview && (
+                  <p className="mt-2 text-sm text-neutral-600">
+                    {summaryPreview.length > 220 ? `${summaryPreview.slice(0, 220)}...` : summaryPreview}
+                  </p>
+                )}
+
+                {meeting?.errorMessage && (
+                  <p className="mt-2 text-xs text-red-500">{meeting.errorMessage}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   if (sessionLoading) {
     return (
       <div className="min-h-screen bg-[#F8F8F6] flex items-center justify-center">
@@ -325,8 +496,11 @@ function App() {
       </header>
 
       {/* ── Main ── */}
-      <main className="pt-13 flex flex-col items-center">
-        <div className="w-full max-w-md px-4 py-14 space-y-3">
+      <main className="pt-13">
+        <div className={user
+          ? "w-full max-w-6xl mx-auto px-4 py-10 lg:py-12 space-y-3"
+          : "w-full max-w-md mx-auto px-4 py-14 space-y-3"}
+        >
 
           {/* Page heading */}
           <div className="text-center pb-6">
@@ -420,7 +594,8 @@ function App() {
 
           ) : (
             /* ── Bot Panel ── */
-            <>
+            <div className="grid items-start gap-4 lg:justify-center lg:grid-cols-[460px_340px] xl:grid-cols-[480px_360px]">
+              <section className="space-y-3">
               {/* Control card */}
               <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.06)] p-5 space-y-4">
 
@@ -487,6 +662,17 @@ function App() {
                     </>
                   )}
                 </button>
+
+                {liveJoined && (
+                  <button
+                    type="button"
+                    onClick={handleTerminate}
+                    disabled={isTerminating}
+                    className="w-full flex items-center justify-center gap-2 border border-red-200 text-red-600 hover:bg-red-50 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl py-2.5 text-sm font-semibold transition-all"
+                  >
+                    {isTerminating ? "Terminating..." : "Terminate"}
+                  </button>
+                )}
               </div>
 
               {/* Status message */}
@@ -549,71 +735,6 @@ function App() {
                 </div>
               )}
 
-              {/* Meeting History */}
-              <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.06)] p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold text-neutral-800">Meeting History</h2>
-                  <button
-                    type="button"
-                    onClick={() => { void loadMeetingHistory(); }}
-                    disabled={historyLoading}
-                    className="text-xs text-neutral-500 hover:text-neutral-800 disabled:opacity-50"
-                  >
-                    {historyLoading ? "Refreshing..." : "Refresh"}
-                  </button>
-                </div>
-
-                {historyLoading ? (
-                  <p className="text-sm text-neutral-400">Loading history...</p>
-                ) : historyError ? (
-                  <p className="text-sm text-red-500">{historyError}</p>
-                ) : meetingHistory.length === 0 ? (
-                  <p className="text-sm text-neutral-400">No meetings in history yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {meetingHistory.map((meeting) => {
-                      const createdAtText = meeting?.createdAt
-                        ? new Date(meeting.createdAt).toLocaleString()
-                        : "Unknown time";
-                      const summaryPreview = String(meeting?.summary || "").trim();
-
-                      return (
-                        <div key={meeting.id} className="rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs text-neutral-500">{createdAtText}</p>
-                            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{meeting?.status || "unknown"}</span>
-                          </div>
-
-                          <p className="mt-1 text-xs text-neutral-400 break-all">{meeting?.meetLink || ""}</p>
-
-                          <div className="mt-2 flex items-center gap-2 text-xs text-neutral-500">
-                            <span>{meeting?.transcriptLineCount || 0} lines</span>
-                            <span className="w-1 h-1 rounded-full bg-neutral-300" />
-                            <span>{meeting?.captureDurationSeconds || 0}s</span>
-                            {meeting?.captureEndReason && (
-                              <>
-                                <span className="w-1 h-1 rounded-full bg-neutral-300" />
-                                <span>{meeting.captureEndReason}</span>
-                              </>
-                            )}
-                          </div>
-
-                          {summaryPreview && (
-                            <p className="mt-2 text-sm text-neutral-600">
-                              {summaryPreview.length > 220 ? `${summaryPreview.slice(0, 220)}...` : summaryPreview}
-                            </p>
-                          )}
-
-                          {meeting?.errorMessage && (
-                            <p className="mt-2 text-xs text-red-500">{meeting.errorMessage}</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
               {/* Summary */}
               {summary && (
                 <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.06)] p-5">
@@ -651,7 +772,12 @@ function App() {
                   <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-600 font-sans">{transcript}</pre>
                 </div>
               )}
-            </>
+              </section>
+
+              <aside className="space-y-3 lg:sticky lg:top-20">
+                {historyPanel}
+              </aside>
+            </div>
           )}
         </div>
       </main>

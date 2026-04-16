@@ -155,6 +155,24 @@ const failMeeting = async (meetingId, message) => {
     });
 };
 
+const terminateMeeting = async (meetingId, message = "Terminated by user.") => {
+    if (!meetingId) {
+        return;
+    }
+
+    await prisma.meeting.update({
+        where: { id: meetingId },
+        data: {
+            status: "terminated",
+            pendingApproval: false,
+            pendingAuth: false,
+            captureEndReason: "terminated-by-user",
+            errorMessage: normalizeText(message),
+            endedAt: new Date(),
+        },
+    });
+};
+
 const listMeetingsForUser = async (userId, { limit = 20 } = {}) => {
     const safeLimit = Math.min(Math.max(toSafeInt(limit, 20), 1), 100);
 
@@ -188,11 +206,52 @@ const listMeetingsForUser = async (userId, { limit = 20 } = {}) => {
     });
 };
 
+const deleteMeetingForUser = async ({ meetingId, userId }) => {
+    const safeMeetingId = normalizeText(meetingId);
+    const safeUserId = normalizeText(userId);
+
+    if (!safeMeetingId || !safeUserId) {
+        return false;
+    }
+
+    const targetMeeting = await prisma.meeting.findFirst({
+        where: {
+            id: safeMeetingId,
+            userId: safeUserId,
+        },
+        select: {
+            id: true,
+        },
+    });
+
+    if (!targetMeeting?.id) {
+        return false;
+    }
+
+    await prisma.$transaction(async (tx) => {
+        await tx.transcriptLine.deleteMany({
+            where: {
+                meetingId: targetMeeting.id,
+            },
+        });
+
+        await tx.meeting.delete({
+            where: {
+                id: targetMeeting.id,
+            },
+        });
+    });
+
+    return true;
+};
+
 module.exports = {
     createMeeting,
     updateMeetingFromStatusEvent,
     markMeetingJoined,
     completeMeeting,
     failMeeting,
+    terminateMeeting,
     listMeetingsForUser,
+    deleteMeetingForUser,
 };

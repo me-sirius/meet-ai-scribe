@@ -19,14 +19,25 @@ const {
     markMeetingJoined,
     completeMeeting,
     failMeeting,
+    terminateMeeting,
     listMeetingsForUser,
+    deleteMeetingForUser,
 } = require("../services/meetingStore");
+
+const activeRuns = new Map();
 
 router.post("/start-bot", requireAuth, async (req, res) => {
 
     const { meetLink, participantName, joinAsGuest } = req.body;
     const runId = String(req.body?.runId || "").trim() || randomUUID();
     const chosenName = String(participantName || "").trim() || req.user?.name || "";
+    const abortController = new AbortController();
+
+    activeRuns.set(runId, {
+        userId: req.user?.id,
+        meetingId: "",
+        abortController,
+    });
 
     createRun({
         runId,
@@ -48,6 +59,11 @@ router.post("/start-bot", requireAuth, async (req, res) => {
             participantName: chosenName,
             joinAsGuest,
         });
+
+        const activeRun = activeRuns.get(runId);
+        if (activeRun) {
+            activeRun.meetingId = meeting?.id || "";
+        }
 
         const result = await startMeetBot({
             meetLink,
@@ -90,6 +106,8 @@ router.post("/start-bot", requireAuth, async (req, res) => {
                 capturedCaptions.push(captionEntry);
                 appendRunCaption(runId, captionEntry);
             },
+        }, {
+            signal: abortController.signal,
         });
 
         completeRun(runId, result);
@@ -139,7 +157,47 @@ router.post("/start-bot", requireAuth, async (req, res) => {
             meetingId: meeting?.id || "",
         });
 
+    } finally {
+        activeRuns.delete(runId);
     }
+});
+
+router.post("/bot-run/:runId/terminate", requireAuth, async (req, res) => {
+    const runId = String(req.params?.runId || "").trim();
+
+    if (!runId) {
+        return res.status(400).json({
+            message: "runId is required.",
+        });
+    }
+
+    const activeRun = activeRuns.get(runId);
+
+    if (!activeRun || activeRun.userId !== req.user?.id) {
+        return res.status(404).json({
+            message: "Active run not found.",
+        });
+    }
+
+    if (!activeRun.abortController.signal.aborted) {
+        activeRun.abortController.abort();
+    }
+
+    setRunStatus(runId, "terminating", {
+        captureEndReason: "terminated-by-user",
+    });
+
+    if (activeRun.meetingId) {
+        await terminateMeeting(activeRun.meetingId, "Terminated by user.")
+            .catch((persistError) => {
+                console.error("Failed to persist terminated meeting", persistError);
+            });
+    }
+
+    return res.json({
+        runId,
+        status: "Termination requested.",
+    });
 });
 
 router.get("/bot-run/:runId/live", requireAuth, (req, res) => {
@@ -181,6 +239,44 @@ router.get("/meetings", requireAuth, async (req, res) => {
     } catch {
         return res.status(500).json({
             message: "Failed to load meeting history.",
+        });
+    }
+});
+
+router.delete("/meetings/:meetingId", requireAuth, async (req, res) => {
+    const meetingId = String(req.params?.meetingId || "").trim();
+
+    if (!meetingId) {
+        return res.status(400).json({
+            message: "meetingId is required.",
+        });
+    }
+
+    try {
+        const deleted = await deleteMeetingForUser({
+            meetingId,
+            userId: req.user?.id,
+        });
+
+        if (!deleted) {
+            return res.status(404).json({
+                message: "Meeting not found.",
+            });
+        }
+
+        return res.json({
+            message: "Meeting deleted.",
+            meetingId,
+        });
+    } catch (error) {
+        console.error("Failed to delete meeting", {
+            meetingId,
+            userId: req.user?.id,
+            message: error?.message || "Unknown error",
+        });
+
+        return res.status(500).json({
+            message: "Failed to delete meeting.",
         });
     }
 });

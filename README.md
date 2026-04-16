@@ -120,3 +120,4 @@ Defaults:
 - Do not commit `.env` files or secrets.
 - Keep the bot profile directory out of git (`chrome-bot-profile/`).
 - First run may require Google account sign-in in the bot browser profile.
+- Heroku deploys: ensure Chromium is installed for the backend package during build (this repo uses `PLAYWRIGHT_BROWSERS_PATH=0` in `heroku-postbuild`) so runtime can find the Playwright executable.
