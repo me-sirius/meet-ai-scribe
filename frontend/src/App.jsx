@@ -224,13 +224,19 @@ function App() {
       }
     };
 
-    await pollLive();
+    const startBotPromise = startBot({ meetLink: trimmedLink, participantName: effectiveName, joinAsGuest, runId });
+
+    // Start live polling after the start request is already in-flight to avoid initial 404 race.
+    void setTimeout(() => {
+      void pollLive();
+    }, 350);
+
     livePollRef.current.timerId = setInterval(() => {
       void pollLive();
     }, 1200);
 
     try {
-      const res = await startBot({ meetLink: trimmedLink, participantName: effectiveName, joinAsGuest, runId });
+      const res = await startBotPromise;
       setStatusMessage(res?.status || "Bot started.");
       setSummary(res?.summary || "");
       setTranscript(res?.transcript || "");

@@ -292,7 +292,13 @@ const launchPersistentChromeContext = async () => {
             );
         }
 
-        throw createHttpError("Failed to launch Playwright persistent context.", 500);
+        const details = compactErrorMessage(launchMessage, 320);
+        throw createHttpError(
+            details
+                ? `Failed to launch Playwright persistent context. Playwright: ${details}`
+                : "Failed to launch Playwright persistent context.",
+            500,
+        );
     }
 
     context.setDefaultTimeout(
@@ -308,8 +314,14 @@ const launchGuestContext = async () => {
     let browser;
     try {
         browser = await chromium.launch(launchOptions);
-    } catch {
-        throw createHttpError("Failed to launch Playwright guest context.", 500);
+    } catch (error) {
+        const details = compactErrorMessage(error?.message, 320);
+        throw createHttpError(
+            details
+                ? `Failed to launch Playwright guest context. Playwright: ${details}`
+                : "Failed to launch Playwright guest context.",
+            500,
+        );
     }
 
     const context = await browser.newContext({ viewport: null });
